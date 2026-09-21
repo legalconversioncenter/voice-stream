@@ -314,11 +314,18 @@ const httpServer = http.createServer(app);
 // Everything else is HTTP/1.1 and goes to Express.
 
 const muxServer = net.createServer((socket) => {
+  const peer = `${socket.remoteAddress}:${socket.remotePort}`;
+  console.log(`[MUX] new connection from ${peer}`);
+
   socket.once('data', (head) => {
-    const isHttp2 = head[0] === 0x50 && head[1] === 0x52 && head[2] === 0x49;
+    const hexHead  = head.slice(0, 16).toString('hex');
+    const asciiHead = head.slice(0, 16).toString('ascii').replace(/[^\x20-\x7e]/g, '.');
+    const isHttp2  = head[0] === 0x50 && head[1] === 0x52 && head[2] === 0x49;
+    console.log(`[MUX] ${peer} first bytes: ${hexHead}  ascii: "${asciiHead}"  → ${isHttp2 ? 'gRPC/HTTP2' : 'HTTP1'}`);
 
     if (isHttp2) {
       // gRPC (HTTP/2) — proxy to internal gRPC server
+      console.log(`[MUX] routing ${peer} → internal gRPC :${GRPC_INT_PORT}`);
       const grpcSocket = net.connect(Number(GRPC_INT_PORT), '127.0.0.1', () => {
         grpcSocket.write(head);
         socket.pipe(grpcSocket);
@@ -330,6 +337,7 @@ const muxServer = net.createServer((socket) => {
       });
     } else {
       // HTTP/1.1 — hand to Express
+      console.log(`[MUX] routing ${peer} → HTTP/Express`);
       httpServer.emit('connection', socket);
       socket.unshift(head);
     }
