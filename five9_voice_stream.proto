@@ -1,0 +1,79 @@
+// Five9 VoiceStream gRPC Proto Definition
+// Based on the Five9 VoiceStream Self-Service developer guide (Sept 2026).
+// Download the official proto from your Five9 developer portal:
+//   https://webapps.five9.com/assets/files/for_customers/documentation/voicestream/grpc_voice_proto.zip
+//
+// IMPORTANT ARCHITECTURE NOTE:
+//   Five9 does NOT multiplex audio channels on a single gRPC connection.
+//   Each call produces TWO separate gRPC sessions — one for the agent leg,
+//   one for the customer leg. Both sessions share the same vcc_call_id so
+//   your server can correlate them.
+//
+// If field names in practice differ from this file, set PROTO_DISCOVERY=true
+// and watch the console output to find the actual names Five9 sends.
+
+syntax = "proto3";
+
+package five9.voicestream;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Five9 (VoiceStream) is the gRPC CLIENT — it connects to your server.
+// Your server implements this service.
+service VoiceStreamService {
+  // Bidirectional stream. Five9 sends MediaStreamRequest messages;
+  // your server may optionally send MediaStreamResponse messages back
+  // to control streaming (START, PAUSE, STOP, RESTART, etc.).
+  rpc StartStream (stream MediaStreamRequest) returns (stream MediaStreamResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inbound messages (Five9 → your server)
+// ─────────────────────────────────────────────────────────────────────────────
+
+message MediaStreamRequest {
+  oneof event {
+    StreamStart  start  = 1;
+    StreamMedia  media  = 2;
+    StreamStop   stop   = 3;
+  }
+}
+
+// First message in the stream — call metadata / session start.
+// Sent once per gRPC session, before any audio.
+// gRPC metadata headers also carry: x-five9-call-id, x-five9-trust-token
+message StreamStart {
+  string domain_id         = 1;  // Five9 customer domain identifier
+  string campaign_id       = 2;  // Campaign identifier
+  string agent_id          = 3;  // Agent identifier for the call
+  string vcc_call_id       = 4;  // Unique Five9 call ID (correlates agent + customer streams)
+  string trust_token       = 5;  // Echo of subscription trust token
+  string subscription_id   = 6;  // VoiceStream Self-Service subscription ID
+  string call_leg          = 7;  // "agent" | "customer" | "supervisor"
+  string encoding          = 8;  // "LINEAR16" (16-bit signed little-endian PCM)
+  int32  sample_per_second = 9;  // Sample rate in Hz (8000)
+}
+
+// Subsequent messages — raw audio bytes, one per gRPC call leg.
+message StreamMedia {
+  bytes  payload      = 1;  // Raw LINEAR16 audio @ 8 kHz (signed 16-bit PCM, little-endian)
+  int64  timestamp_ms = 2;  // Wall-clock timestamp in milliseconds
+}
+
+// Final message — stream teardown.
+message StreamStop {
+  string vcc_call_id = 1;
+  string reason      = 2;  // e.g. "NORMAL_CLEARING"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Outbound messages (your server → Five9) — optional control / ack
+// ─────────────────────────────────────────────────────────────────────────────
+
+message MediaStreamResponse {
+  string call_id  = 1;
+  string status   = 2;  // "OK" | "ERROR"
+  string message  = 3;
+}
